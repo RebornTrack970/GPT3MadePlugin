@@ -1,73 +1,96 @@
 package example;
 
 import arc.Events;
-import arc.math.Mathf;
-import arc.util.Time;
+import arc.struct.Seq;
+import arc.util.Log;
+import arc.util.Timer;
+import mindustry.content.UnitTypes;
+import mindustry.entities.Units;
 import mindustry.game.EventType;
-import mindustry.game.Team;
 import mindustry.gen.Call;
 import mindustry.gen.Groups;
 import mindustry.gen.Player;
-import mindustry.gen.Unit;
 import mindustry.mod.Plugin;
 
 public class UnitStrengthMultiplierPlugin extends Plugin {
 
-    private float damageMultiplier = 2.0f;
-    private float timeToWait = 10.0f;
+    // Constants
+    private static final String UI_TEXT_COLOR = "[#FFB6C1]";
+    private static final String UI_TEXT_FORMAT = UI_TEXT_COLOR + "Dmg Multiplier: %.1fx\nHP Multiplier: %.1fx";
+    private static final float MULTIPLIER_INCREMENT = 0.1f;
+
+    // Variables
+    private float damageMultiplier = 1f;
+    private float healthMultiplier = 1f;
+    private float increaseTime;
+    private Timer.Task increaseTask;
 
     @Override
-    public void registerClientCommands(CommandHandler handler){
-        handler.register("multiply-damage", "Sets the damage multiplier for units.", (args) -> {
-            if(args.length == 0){
-                Call.infoPopup("Usage: /multiply-damage [multiplier]", 5f, null);
-                return;
-            }
+    public void init() {
+        // Register the event listener for updating the UI text
+        Events.on(EventType.WorldLoadEvent.class, event -> {
+            Call.onInfoToast(UI_TEXT_FORMAT, 10f, () -> String.format(UI_TEXT_FORMAT, damageMultiplier, healthMultiplier));
+        });
 
+        // Schedule the unit multiplier increase task if needed
+        if (increaseTime > 0) {
+            increaseTask = Timer.schedule(() -> {
+                damageMultiplier += MULTIPLIER_INCREMENT;
+                healthMultiplier += MULTIPLIER_INCREMENT;
+                Call.onInfoMessage(UI_TEXT_COLOR + "Unit strength increased by 0.1x!");
+            }, increaseTime, increaseTime);
+        }
+    }
+
+    @Override
+    public void registerServerCommands(CommandHandler handler) {
+        handler.register("unitConfig", "<delay>", "Set the delay before unit strength is increased by 0.1x.", arg -> {
             try {
-                float newMultiplier = Float.parseFloat(args[0]);
-                damageMultiplier = newMultiplier;
-                Call.infoPopup("Damage multiplier set to " + damageMultiplier, 5f, null);
-            } catch (NumberFormatException e){
-                Call.infoPopup("Invalid multiplier value.", 5f, null);
+                float delay = Float.parseFloat(arg);
+                increaseTime = delay;
+                if (increaseTime > 0) {
+                    if (increaseTask != null) increaseTask.cancel();
+                    increaseTask = Timer.schedule(() -> {
+                        damageMultiplier += MULTIPLIER_INCREMENT;
+                        healthMultiplier += MULTIPLIER_INCREMENT;
+                        Call.onInfoMessage(UI_TEXT_COLOR + "Unit strength increased by 0.1x!");
+                    }, increaseTime, increaseTime);
+                    Call.onInfoMessage(UI_TEXT_COLOR + "Unit strength increase scheduled in " + increaseTime + " seconds.");
+                } else {
+                    Call.onInfoMessage(UI_TEXT_COLOR + "Unit strength increase canceled.");
+                }
+            } catch (NumberFormatException e) {
+                Log.err("Invalid delay specified: " + arg);
             }
         });
     }
 
     @Override
-    public void registerServerCommands(CommandHandler handler){
-        handler.register("multiply-damage", "Sets the damage multiplier for units.", (args) -> {
-            if(args.length == 0){
-                Log.info("Usage: /multiply-damage [multiplier]");
-                return;
-            }
-
-            try {
-                float newMultiplier = Float.parseFloat(args[0]);
-                damageMultiplier = newMultiplier;
-                Log.info("Damage multiplier set to " + damageMultiplier);
-            } catch (NumberFormatException e){
-                Log.info("Invalid multiplier value.");
-            }
-        });
+    public void registerClientCommands(CommandHandler handler) {
+        // No client commands to register
     }
 
     @Override
-    public void init(){
-        Events.on(UnitSpawnEvent.class, event -> {
-            Unit unit = event.unit;
-            if(unit.team() != Team.derelict && unit.team() != Team.crux){
-                unit.damage(unit.health() * damageMultiplier);
-            }
-        });
+    public void registerClientListeners(Seq<ClientModListener> listeners) {
+        // No client listeners to register
+    }
 
-        Events.on(EventType.Trigger.update, () -> {
-            if(Mathf.mod(Time.time(), timeToWait) < 0.05f){
-                Groups.unit.each(unit -> {
-                    if(unit.team() != Team.derelict && unit.team() != Team.crux){
-                        unit.damage(unit.health() * (damageMultiplier - 1));
-                    }
-                });
+    @Override
+    public void registerServerListeners(Seq<ServerEventListener> listeners) {
+        // Register the event listener for unit damage and health
+        listeners.add(new ServerEventListener() {
+            @Override
+            public void unitDamaged(Unit unit, Healthc health, float damageAmount, boolean hit) {
+                // Modify the damage amount based on the damage multiplier
+                damageAmount *= damageMultiplier;
+            }
+
+            @Override
+            public void unitHealthChanged(Unit unit, Healthc health, float amount) {
+                // Modify the health amount based on the health multiplier
+                float maxHealth = unit.health();
+                unit.health(amount * healthMultiplier);
+                unit.maxHealth(maxHealth * healthMultiplier);
             }
         });
     }
